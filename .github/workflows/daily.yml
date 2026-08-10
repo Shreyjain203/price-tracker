@@ -1,4 +1,4 @@
-name: bulova-price-check
+name: price-check
 
 on:
   schedule:

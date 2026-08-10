@@ -87,7 +87,7 @@ def build_card(name, code, url, old_price, new_price):
     html = f"""\
       <div style="background:#0b1f3a;padding:20px 24px;">
         <span style="color:#ffffff;font-size:13px;letter-spacing:.05em;
-                     text-transform:uppercase;opacity:.7;">Price Watch</span>
+                     text-transform:uppercase;opacity:.7;">Price Tracker</span>
         <h1 style="color:#ffffff;font-size:20px;margin:6px 0 0;">{name}</h1>
         <span style="color:#ffffff;opacity:.6;font-size:12px;">{code}</span>
       </div>
@@ -130,11 +130,11 @@ def send_summary_email(changes):
     subject = (
         f"👀 Price moved on {changes[0]['name']}"
         if n == 1
-        else f"👀 Price moved on {n} watches"
+        else f"👀 Price moved on {n} items"
     )
 
     intro = "Yo 👋 the price just changed on this one." if n == 1 else \
-        f"Yo 👋 {n} watches on your list just changed price."
+        f"Yo 👋 {n} items on your list just changed price."
 
     plain_parts = [intro, ""]
     html_cards = []
