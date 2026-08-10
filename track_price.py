@@ -68,7 +68,7 @@ def send_email(subject, plain_body, html_body):
         s.send_message(msg)
 
 
-def build_email(name, code, url, old_price, new_price, old_date, today):
+def build_card(name, code, url, old_price, new_price):
     dropped = new_price < old_price
     diff = abs(new_price - old_price)
     accent = "#16a34a" if dropped else "#dc2626"
@@ -78,22 +78,13 @@ def build_email(name, code, url, old_price, new_price, old_date, today):
         if dropped
         else f"Up ${diff:,.2f}. Guess it's not the day to buy."
     )
-    subject = f"{arrow} {name} just moved ${diff:,.2f}"
 
-    plain_body = (
-        f"{name} ({code})\n{url}\n\n"
-        f"{old_date}: ${old_price:,.2f}\n"
-        f"{today}: ${new_price:,.2f}\n\n"
-        f"{verdict}"
+    plain = (
+        f"{name} ({code})\n{url}\n"
+        f"${old_price:,.2f} -> ${new_price:,.2f}\n{verdict}\n"
     )
 
-    html_body = f"""\
-<html>
-  <body style="margin:0;padding:24px;background:#f5f5f7;
-               font-family:-apple-system,Helvetica,Arial,sans-serif;">
-    <div style="max-width:420px;margin:0 auto;background:#ffffff;
-                border-radius:16px;overflow:hidden;
-                border:1px solid #e5e5ea;">
+    html = f"""\
       <div style="background:#0b1f3a;padding:20px 24px;">
         <span style="color:#ffffff;font-size:13px;letter-spacing:.05em;
                      text-transform:uppercase;opacity:.7;">Price Watch</span>
@@ -101,9 +92,6 @@ def build_email(name, code, url, old_price, new_price, old_date, today):
         <span style="color:#ffffff;opacity:.6;font-size:12px;">{code}</span>
       </div>
       <div style="padding:24px;">
-        <p style="font-size:15px;color:#1c1c1e;margin:0 0 20px;">
-          Yo 👋 the price on this watch just changed.
-        </p>
         <table style="width:100%;border-collapse:collapse;margin-bottom:20px;">
           <tr>
             <td style="padding:10px 0;color:#8e8e93;font-size:13px;">Yesterday</td>
@@ -133,11 +121,42 @@ def build_email(name, code, url, old_price, new_price, old_date, today):
           Check it out →
         </a>
       </div>
+"""
+    return plain, html
+
+
+def send_summary_email(changes):
+    n = len(changes)
+    subject = (
+        f"👀 Price moved on {changes[0]['name']}"
+        if n == 1
+        else f"👀 Price moved on {n} watches"
+    )
+
+    intro = "Yo 👋 the price just changed on this one." if n == 1 else \
+        f"Yo 👋 {n} watches on your list just changed price."
+
+    plain_parts = [intro, ""]
+    html_cards = []
+    for c in changes:
+        plain, html = build_card(c["name"], c["code"], c["url"], c["old_price"], c["new_price"])
+        plain_parts.append(plain)
+        html_cards.append(f'<div style="border-radius:16px;overflow:hidden;border:1px solid #e5e5ea;margin-bottom:16px;">{html}</div>')
+
+    plain_body = "\n".join(plain_parts)
+
+    html_body = f"""\
+<html>
+  <body style="margin:0;padding:24px;background:#f5f5f7;
+               font-family:-apple-system,Helvetica,Arial,sans-serif;">
+    <div style="max-width:420px;margin:0 auto;">
+      <p style="font-size:15px;color:#1c1c1e;margin:0 0 20px;">{intro}</p>
+      {''.join(html_cards)}
     </div>
   </body>
 </html>
 """
-    return subject, plain_body, html_body
+    send_email(subject, plain_body, html_body)
 
 
 def main():
@@ -145,21 +164,28 @@ def main():
     history = json.loads(HISTORY_FILE.read_text()) if HISTORY_FILE.exists() else {}
 
     today = date.today().isoformat()
+    changes = []
 
     for url in links:
         code, name, price = fetch_product(url)
         prev = history.get(code)
 
         if prev is not None and prev["price"] != price:
-            subject, plain_body, html_body = build_email(
-                name, code, url, prev["price"], price, prev["date"], today
-            )
-            send_email(subject, plain_body, html_body)
+            changes.append({
+                "code": code,
+                "name": name,
+                "url": url,
+                "old_price": prev["price"],
+                "new_price": price,
+            })
             print(f"CHANGED {code}: {prev['price']} -> {price}")
         else:
             print(f"no change {code}: {price}")
 
         history[code] = {"date": today, "name": name, "url": url, "price": price}
+
+    if changes:
+        send_summary_email(changes)
 
     HISTORY_FILE.write_text(json.dumps(history, indent=2) + "\n")
 
