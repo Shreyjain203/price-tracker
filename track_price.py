@@ -15,6 +15,7 @@ HISTORY_FILE = BASE_DIR / "price_history.json"
 GMAIL_EMAIL = os.environ["GMAIL_EMAIL"]
 GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
 NOTIFY_TO = os.environ.get("NOTIFY_TO", GMAIL_EMAIL)
+ERROR_TO = os.environ.get("ERROR_TO", GMAIL_EMAIL)
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -54,10 +55,10 @@ def fetch_product(url):
     return code, name, price
 
 
-def send_email(subject, plain_body, html_body):
+def send_email(subject, plain_body, html_body, to_addr=None):
     msg = EmailMessage()
     msg["From"] = GMAIL_EMAIL
-    msg["To"] = NOTIFY_TO
+    msg["To"] = to_addr or NOTIFY_TO
     msg["Subject"] = subject
     msg.set_content(plain_body)
     msg.add_alternative(html_body, subtype="html")
@@ -159,15 +160,57 @@ def send_summary_email(changes):
     send_email(subject, plain_body, html_body)
 
 
+def send_error_email(errors):
+    subject = f"⚠️ Price tracker error ({len(errors)})"
+
+    plain_lines = ["Price tracker run hit an error:\n"]
+    html_items = []
+    for e in errors:
+        plain_lines.append(f"- {e['url']}: {e['error']}")
+        html_items.append(
+            f'<li style="margin-bottom:10px;">'
+            f'<div style="color:#1c1c1e;font-size:13px;word-break:break-all;">{e["url"]}</div>'
+            f'<div style="color:#dc2626;font-size:13px;">{e["error"]}</div></li>'
+        )
+    plain_body = "\n".join(plain_lines)
+
+    html_body = f"""\
+<html>
+  <body style="margin:0;padding:24px;background:#f5f5f7;
+               font-family:-apple-system,Helvetica,Arial,sans-serif;">
+    <div style="max-width:420px;margin:0 auto;background:#ffffff;
+                border-radius:16px;overflow:hidden;border:1px solid #e5e5ea;">
+      <div style="background:#dc2626;padding:20px 24px;">
+        <span style="color:#ffffff;font-size:13px;letter-spacing:.05em;
+                     text-transform:uppercase;opacity:.8;">Price Tracker</span>
+        <h1 style="color:#ffffff;font-size:18px;margin:6px 0 0;">Something broke</h1>
+      </div>
+      <div style="padding:24px;">
+        <ul style="padding-left:18px;margin:0;">{''.join(html_items)}</ul>
+      </div>
+    </div>
+  </body>
+</html>
+"""
+    send_email(subject, plain_body, html_body, to_addr=ERROR_TO)
+
+
 def main():
     links = read_links()
     history = json.loads(HISTORY_FILE.read_text()) if HISTORY_FILE.exists() else {}
 
     today = date.today().isoformat()
     changes = []
+    errors = []
 
     for url in links:
-        code, name, price = fetch_product(url)
+        try:
+            code, name, price = fetch_product(url)
+        except Exception as e:
+            print(f"ERROR fetching {url}: {e}")
+            errors.append({"url": url, "error": str(e)})
+            continue
+
         prev = history.get(code)
 
         if prev is not None and prev["price"] != price:
@@ -187,8 +230,24 @@ def main():
     if changes:
         send_summary_email(changes)
 
+    if errors:
+        send_error_email(errors)
+
     HISTORY_FILE.write_text(json.dumps(history, indent=2) + "\n")
+
+    if errors:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception as e:
+        print(f"FATAL: {e}")
+        try:
+            send_error_email([{"url": "(script-level failure)", "error": str(e)}])
+        except Exception as mail_err:
+            print(f"also failed to send error email: {mail_err}")
+        raise
