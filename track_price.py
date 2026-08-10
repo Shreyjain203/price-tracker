@@ -54,17 +54,90 @@ def fetch_product(url):
     return code, name, price
 
 
-def send_email(subject, body):
+def send_email(subject, plain_body, html_body):
     msg = EmailMessage()
     msg["From"] = GMAIL_EMAIL
     msg["To"] = NOTIFY_TO
     msg["Subject"] = subject
-    msg.set_content(body)
+    msg.set_content(plain_body)
+    msg.add_alternative(html_body, subtype="html")
 
     with smtplib.SMTP("smtp.gmail.com", 587) as s:
         s.starttls()
         s.login(GMAIL_EMAIL, GMAIL_APP_PASSWORD)
         s.send_message(msg)
+
+
+def build_email(name, code, url, old_price, new_price, old_date, today):
+    dropped = new_price < old_price
+    diff = abs(new_price - old_price)
+    accent = "#16a34a" if dropped else "#dc2626"
+    arrow = "↓" if dropped else "↑"
+    verdict = (
+        f"Down ${diff:,.2f}. Might be worth jumping on this one."
+        if dropped
+        else f"Up ${diff:,.2f}. Guess it's not the day to buy."
+    )
+    subject = f"{arrow} {name} just moved ${diff:,.2f}"
+
+    plain_body = (
+        f"{name} ({code})\n{url}\n\n"
+        f"{old_date}: ${old_price:,.2f}\n"
+        f"{today}: ${new_price:,.2f}\n\n"
+        f"{verdict}"
+    )
+
+    html_body = f"""\
+<html>
+  <body style="margin:0;padding:24px;background:#f5f5f7;
+               font-family:-apple-system,Helvetica,Arial,sans-serif;">
+    <div style="max-width:420px;margin:0 auto;background:#ffffff;
+                border-radius:16px;overflow:hidden;
+                border:1px solid #e5e5ea;">
+      <div style="background:#0b1f3a;padding:20px 24px;">
+        <span style="color:#ffffff;font-size:13px;letter-spacing:.05em;
+                     text-transform:uppercase;opacity:.7;">Price Watch</span>
+        <h1 style="color:#ffffff;font-size:20px;margin:6px 0 0;">{name}</h1>
+        <span style="color:#ffffff;opacity:.6;font-size:12px;">{code}</span>
+      </div>
+      <div style="padding:24px;">
+        <p style="font-size:15px;color:#1c1c1e;margin:0 0 20px;">
+          Yo 👋 the price on this watch just changed.
+        </p>
+        <table style="width:100%;border-collapse:collapse;margin-bottom:20px;">
+          <tr>
+            <td style="padding:10px 0;color:#8e8e93;font-size:13px;">Yesterday</td>
+            <td style="padding:10px 0;text-align:right;font-size:15px;
+                       color:#8e8e93;text-decoration:line-through;">
+              ${old_price:,.2f}
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:10px 0;color:#1c1c1e;font-size:13px;
+                       border-top:1px solid #f0f0f2;">Today</td>
+            <td style="padding:10px 0;text-align:right;font-size:22px;
+                       font-weight:700;color:{accent};
+                       border-top:1px solid #f0f0f2;">
+              {arrow} ${new_price:,.2f}
+            </td>
+          </tr>
+        </table>
+        <p style="font-size:14px;color:#1c1c1e;background:#f5f5f7;
+                  padding:12px 14px;border-radius:10px;margin:0 0 20px;">
+          {verdict}
+        </p>
+        <a href="{url}" style="display:block;text-align:center;
+                  background:{accent};color:#ffffff;text-decoration:none;
+                  padding:12px 0;border-radius:10px;font-size:14px;
+                  font-weight:600;">
+          Check it out →
+        </a>
+      </div>
+    </div>
+  </body>
+</html>
+"""
+    return subject, plain_body, html_body
 
 
 def main():
@@ -78,12 +151,10 @@ def main():
         prev = history.get(code)
 
         if prev is not None and prev["price"] != price:
-            send_email(
-                f"Price change: {name} ({code})",
-                f"{name} ({code})\n{url}\n\n"
-                f"Yesterday ({prev['date']}): ${prev['price']:.2f}\n"
-                f"Today ({today}): ${price:.2f}\n",
+            subject, plain_body, html_body = build_email(
+                name, code, url, prev["price"], price, prev["date"], today
             )
+            send_email(subject, plain_body, html_body)
             print(f"CHANGED {code}: {prev['price']} -> {price}")
         else:
             print(f"no change {code}: {price}")
