@@ -9,7 +9,7 @@ from pathlib import Path
 import requests
 
 BASE_DIR = Path(__file__).parent
-PRODUCTS_FILE = BASE_DIR / "products.json"
+LINKS_FILE = BASE_DIR / "links.txt"
 HISTORY_FILE = BASE_DIR / "price_history.json"
 
 GMAIL_EMAIL = os.environ["GMAIL_EMAIL"]
@@ -22,15 +22,36 @@ HEADERS = {
 }
 
 PRICE_RE = re.compile(r'data-sticky-add-to-cart-price="\$([\d,]+\.\d{2})"')
+ITEM_RE = re.compile(r'"item_id":"([^"]+)","item_name":"([^"]+)"')
 
 
-def fetch_price(url):
+def read_links():
+    links = []
+    for line in LINKS_FILE.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            links.append(line)
+    return links
+
+
+def fetch_product(url):
     resp = requests.get(url, headers=HEADERS, timeout=20)
     resp.raise_for_status()
-    match = PRICE_RE.search(resp.text)
-    if not match:
+    html = resp.text
+
+    price_match = PRICE_RE.search(html)
+    if not price_match:
         raise ValueError(f"price not found on page: {url}")
-    return float(match.group(1).replace(",", ""))
+    price = float(price_match.group(1).replace(",", ""))
+
+    item_match = ITEM_RE.search(html)
+    if item_match:
+        code, name = item_match.group(1), item_match.group(2)
+    else:
+        code = url.rstrip("/").rsplit("/", 1)[-1].removesuffix(".html")
+        name = code
+
+    return code, name, price
 
 
 def send_email(subject, body):
@@ -47,17 +68,13 @@ def send_email(subject, body):
 
 
 def main():
-    products = json.loads(PRODUCTS_FILE.read_text())
+    links = read_links()
     history = json.loads(HISTORY_FILE.read_text()) if HISTORY_FILE.exists() else {}
 
     today = date.today().isoformat()
 
-    for product in products:
-        code = product["code"]
-        name = product["name"]
-        url = product["url"]
-
-        price = fetch_price(url)
+    for url in links:
+        code, name, price = fetch_product(url)
         prev = history.get(code)
 
         if prev is not None and prev["price"] != price:
@@ -71,7 +88,7 @@ def main():
         else:
             print(f"no change {code}: {price}")
 
-        history[code] = {"date": today, "price": price}
+        history[code] = {"date": today, "name": name, "url": url, "price": price}
 
     HISTORY_FILE.write_text(json.dumps(history, indent=2) + "\n")
 
