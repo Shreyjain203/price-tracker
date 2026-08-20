@@ -22,8 +22,10 @@ HEADERS = {
     "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 }
 
-PRICE_RE = re.compile(r'data-sticky-add-to-cart-price="\$([\d,]+\.\d{2})"')
+ADD_TO_CART_RE = re.compile(r'btn-add-to-cart"[\s\S]{0,900}')
+PRICE_RE = re.compile(r'\$([\d,]+\.\d{2})')
 ITEM_RE = re.compile(r'"item_id":"([^"]+)","item_name":"([^"]+)"')
+TITLE_RE = re.compile(r'<title[^>]*>([^<|]+?)\s*\|')
 
 
 def read_links():
@@ -40,16 +42,21 @@ def fetch_product(url):
     resp.raise_for_status()
     html = resp.text
 
-    price_match = PRICE_RE.search(html)
-    if not price_match:
+    cart_block_match = ADD_TO_CART_RE.search(html)
+    prices = PRICE_RE.findall(cart_block_match.group(0)) if cart_block_match else []
+    if not prices:
         raise ValueError(f"price not found on page: {url}")
-    price = float(price_match.group(1).replace(",", ""))
+    price = float(prices[-1].replace(",", ""))
+
+    code = url.rstrip("/").rsplit("/", 1)[-1].removesuffix(".html")
 
     item_match = ITEM_RE.search(html)
+    title_match = TITLE_RE.search(html)
     if item_match:
         code, name = item_match.group(1), item_match.group(2)
+    elif title_match:
+        name = title_match.group(1).strip()
     else:
-        code = url.rstrip("/").rsplit("/", 1)[-1].removesuffix(".html")
         name = code
 
     return code, name, price
